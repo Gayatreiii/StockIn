@@ -1,3 +1,9 @@
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "core"))
+sys.path.append(os.path.dirname(__file__))
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -154,8 +160,8 @@ html, body, [class*="css"] {
 div[data-testid="stPlotlyChart"] { border-radius: 12px; overflow: hidden; }
 </style>
 """, unsafe_allow_html=True)
+from data_pipeline import fetch_stock_data, get_stock_info, STOCKS, resolve_ticker
 
-from core.data_pipeline import fetch_stock_data, get_stock_info, STOCKS, resolve_ticker
 from core.charts import plot_price_chart, plot_indicators_chart
 from core.analysis import get_technical_indicators, get_support_resistance, simple_prediction
 from core.chatbot import get_chat_response
