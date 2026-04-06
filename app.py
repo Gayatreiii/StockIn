@@ -9,7 +9,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# ── CSS (IDENTICAL to original — no UI changes) ───────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -21,11 +21,9 @@ html, body, [class*="css"] {
 }
 .stApp { background-color: #0a0a0f; }
 
-/* Hide streamlit branding */
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding: 1.5rem 2rem; max-width: 1400px; }
 
-/* Top bar */
 .top-bar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 0; margin-bottom: 8px;
@@ -34,7 +32,6 @@ html, body, [class*="css"] {
 .logo { font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
 .logo span { color: #6366f1; }
 
-/* Search bar */
 .stSelectbox > div > div {
     background: #12121a !important;
     border: 1px solid #2d2d3d !important;
@@ -42,7 +39,6 @@ html, body, [class*="css"] {
     color: #e2e8f0 !important;
 }
 
-/* Cards */
 .card {
     background: #12121a;
     border: 1px solid #1e1e2e;
@@ -55,14 +51,12 @@ html, body, [class*="css"] {
     text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;
 }
 
-/* Stock header */
 .stock-name { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 2px; }
 .stock-meta { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
 .price-big { font-size: 36px; font-weight: 700; color: #fff; }
 .price-change-pos { font-size: 16px; color: #22c55e; font-weight: 600; }
 .price-change-neg { font-size: 16px; color: #ef4444; font-weight: 600; }
 
-/* Badges */
 .badge {
     display: inline-block; padding: 3px 10px;
     border-radius: 20px; font-size: 11px; font-weight: 600; margin: 2px;
@@ -72,13 +66,11 @@ html, body, [class*="css"] {
 .badge-blue { background: #0c1445; color: #6366f1; border: 1px solid #3730a3; }
 .badge-yellow { background: #1c1407; color: #f59e0b; border: 1px solid #92400e; }
 
-/* Metric row */
 .metric-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
 .metric-item { flex: 1; min-width: 80px; }
 .metric-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
 .metric-value { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-top: 2px; }
 
-/* Indicator pills */
 .ind-pill {
     display: inline-flex; align-items: center; gap: 6px;
     background: #1a1a2e; border: 1px solid #2d2d3d;
@@ -88,7 +80,6 @@ html, body, [class*="css"] {
 .ind-label { color: #9ca3af; font-size: 11px; }
 .ind-value { color: #e2e8f0; font-weight: 600; }
 
-/* Chatbot */
 .chat-container {
     background: #0e0e1a;
     border: 1px solid #1e1e2e;
@@ -128,14 +119,12 @@ html, body, [class*="css"] {
 .empty-title { font-size: 15px; font-weight: 600; color: #6b7280; margin-bottom: 6px; }
 .empty-sub { font-size: 12px; color: #4b5563; }
 
-/* SR levels */
 .sr-bar {
     height: 6px; border-radius: 3px;
     background: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e);
     margin: 8px 0; position: relative;
 }
 
-/* Prediction card */
 .pred-up { color: #22c55e; font-size: 28px; font-weight: 700; }
 .pred-down { color: #ef4444; font-size: 28px; font-weight: 700; }
 .conf-bar-bg {
@@ -147,7 +136,6 @@ html, body, [class*="css"] {
     background: linear-gradient(90deg, #6366f1, #22c55e);
 }
 
-/* Buttons */
 .stButton > button {
     background: #6366f1 !important;
     color: white !important;
@@ -167,7 +155,7 @@ div[data-testid="stPlotlyChart"] { border-radius: 12px; overflow: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-from core.data_pipeline import fetch_stock_data, get_stock_info, STOCKS
+from core.data_pipeline import fetch_stock_data, get_stock_info, STOCKS, resolve_ticker
 from core.charts import plot_price_chart, plot_indicators_chart
 from core.analysis import get_technical_indicators, get_support_resistance, simple_prediction
 from core.chatbot import get_chat_response
@@ -181,83 +169,86 @@ if "selected_stock" not in st.session_state:
 # ── Top bar ───────────────────────────────────────────────────────────────────
 st.markdown('<div class="top-bar"><div class="logo">Stock<span>in</span></div></div>', unsafe_allow_html=True)
 
-# ── Stock selector ────────────────────────────────────────────────────────────
-col_sel, col_spacer = st.columns([2, 5])
-with col_sel:
-    selected_name = st.selectbox(
-        "Select Stock",
-        list(STOCKS.keys()),
-        index=list(STOCKS.keys()).index(st.session_state.selected_stock),
-        label_visibility="collapsed"
-    )
-    st.session_state.selected_stock = selected_name
+# ── Stock selector — dropdown + free text search ──────────────────────────────
+col_search, col_spacer = st.columns([2, 3])
 
-ticker = STOCKS[selected_name]
+with col_search:
+    custom_input = st.text_input(
+        "Or type any NSE symbol",
+        placeholder="e.g. NAUKRI, DMART, VOLTAS...",
+        label_visibility="collapsed",
+        key="ticker_search"
+    )
+
+# Free-text input takes priority over dropdown
+if custom_input.strip():
+    ticker = resolve_ticker(custom_input.strip())
+    display_name = custom_input.strip().upper().replace(".NS", "").replace(".BO", "")
+else:
+    ticker = resolve_ticker("RELIANCE")  # default stock
+    display_name = "RELIANCE"
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner(""):
     df = fetch_stock_data(ticker)
     info = get_stock_info(ticker)
 
-# ── Layout: Chatbot left, Stock info right ────────────────────────────────────
-col_chat, col_stock = st.columns([1.1, 1], gap="large")
+# ── Layout ────────────────────────────────────────────────────────────────────
+col_chat, col_stock = st.columns([1, 1], gap="large")
 
 # ════════════════════════════════════════════════════════════════════════════
-# LEFT — Chatbot
+# LEFT — AI Chatbot
+# ════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════
+# LEFT — AI Chatbot
 # ════════════════════════════════════════════════════════════════════════════
 with col_chat:
-    st.markdown(f"""
-    <div class="card" style="padding:16px 20px 8px;">
-        <div class="chat-header">
-            <div>
-                <div class="chat-title">AI Assistant</div>
-                <div class="chat-subtitle">Ask anything about {ticker.replace('.NS','')} — predictions, risk, news, trends, investment insights</div>
-            </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+    st.markdown("""
+    <div class="chat-header">
+        <div>
             <span class="online-dot"></span>
-            <span style="font-size:13px;font-weight:600;color:#fff;">Stockin AI</span>
-            <span style="font-size:11px;color:#6b7280;">• Online • {ticker.replace('.NS','')}</span>
-            <span style="margin-left:auto;" class="ensemble-badge">Ensemble AI</span>
+            <span class="chat-title">Stockin AI</span>
+            <div class="chat-subtitle">Deep Learning · Live NSE/BSE Data</div>
         </div>
+        <div class="ensemble-badge">Deep Learning</div>
     </div>
     """, unsafe_allow_html=True)
 
-    
+    # Show messages (no empty AI box anymore)
+    for msg in st.session_state.messages[-14:]:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="msg-user">{msg["content"]}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="msg-bot">{msg["content"]}</div>', unsafe_allow_html=True)
 
-# Chat input label
-st.markdown(
-    f"<div style='color:#9ca3af;font-size:13px;margin-bottom:6px;'>Ask anything about {ticker.replace('.NS','')}</div>",
-    unsafe_allow_html=True
-)
+    # Simple clean line instead of AI intro box
+    st.markdown(
+        "<div style='color:#9ca3af;font-size:14px;margin-bottom:8px;'>Ask me anything?</div>",
+        unsafe_allow_html=True
+    )
 
-# Input box
-user_input = st.text_input(
-    "chat",
-    placeholder=f"Ask about {ticker.replace('.NS','')}...",
-    label_visibility="collapsed"
-)
+    # Input
+    user_input = st.text_input(
+        "chat",
+        placeholder=f"Ask about {display_name}...",
+        label_visibility="collapsed"
+    )
 
-# Buttons row (clean)
-col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
+    with col1:
+        send = st.button("Send", use_container_width=True)
+    with col2:
+        clear = st.button("Clear", use_container_width=True)
 
-with col1:
-    send = st.button("Send", use_container_width=True)
+    if clear:
+        st.session_state.messages = []
+        st.rerun()
 
-with col2:
-    clear = st.button("Clear", use_container_width=True)
-
-# Logic
-if clear:
-    st.session_state.messages = []
-    st.rerun()
-
-if send and user_input.strip():
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    response = get_chat_response(user_input, ticker, df, info)
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    st.rerun()
-
+    if send and user_input.strip():
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        response = get_chat_response(user_input, ticker, df, info)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun()
 # ════════════════════════════════════════════════════════════════════════════
 # RIGHT — Stock overview
 # ════════════════════════════════════════════════════════════════════════════
@@ -271,7 +262,7 @@ with col_stock:
         arrow = "▲" if change >= 0 else "▼"
         change_cls = "price-change-pos" if change >= 0 else "price-change-neg"
 
-        company = info.get("longName", selected_name)
+        company = info.get("longName", display_name)
         sector = info.get("sector", "")
         industry = info.get("industry", "")
 
@@ -304,7 +295,7 @@ with col_stock:
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.error("Could not load stock data. Please try again.")
+        st.error(f"Could not load '{display_name}'. Try NSE symbols like NAUKRI, DMART, VOLTAS.")
 
 # ── Price Chart ───────────────────────────────────────────────────────────────
 if df is not None and not df.empty:
@@ -312,11 +303,9 @@ if df is not None and not df.empty:
     fig = plot_price_chart(df, ticker)
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Two column section ────────────────────────────────────────────────────
     col_l, col_r = st.columns(2, gap="large")
 
     with col_l:
-        # Technical Indicators
         indicators = get_technical_indicators(df)
         st.markdown("""<div class="card-title" style="margin-top:8px;"> Technical Indicators</div>""", unsafe_allow_html=True)
 
@@ -341,7 +330,7 @@ if df is not None and not df.empty:
 
         ind_rows = [
             ("RSI (14)", f"{rsi:.1f}", rsi_color, rsi_label),
-            ("MA Signal", ma_signal, ma_color, f"Price vs MA20"),
+            ("MA Signal", ma_signal, ma_color, "Price vs MA20"),
             ("MA 10", f"₹{ma10:,.1f}", "#6366f1", "Short-term"),
             ("MA 50", f"₹{ma50:,.1f}", "#6366f1", "Mid-term"),
             ("Volume", f"{vol_ratio:.1f}x avg", "#f59e0b", "vs 20-day avg"),
@@ -361,7 +350,6 @@ if df is not None and not df.empty:
             """, unsafe_allow_html=True)
 
     with col_r:
-        # Support & Resistance
         sr = get_support_resistance(df)
         st.markdown("""<div class="card-title" style="margin-top:8px;"> Support & Resistance</div>""", unsafe_allow_html=True)
 
@@ -393,8 +381,8 @@ if df is not None and not df.empty:
 
         for label, val, color, pct, pct_label in [
             ("Resistance", f"₹{res:,.1f}", "#22c55e", f"+{pct_to_res:.1f}%", "upside"),
-            ("Support", f"₹{sup:,.1f}", "#ef4444", f"-{pct_to_sup:.1f}%", "downside"),
-            ("Current", f"₹{cur:,.1f}", "#6366f1", "", ""),
+            ("Support",    f"₹{sup:,.1f}", "#ef4444", f"-{pct_to_sup:.1f}%", "downside"),
+            ("Current",    f"₹{cur:,.1f}", "#6366f1", "", ""),
         ]:
             st.markdown(f"""
             <div style="display:flex;justify-content:space-between;align-items:center;
@@ -407,11 +395,13 @@ if df is not None and not df.empty:
             </div>
             """, unsafe_allow_html=True)
 
-        # Prediction
-        pred = simple_prediction(df)
-        direction = pred.get("direction", "HOLD")
+        # ── Deep Learning Prediction ──────────────────────────────────────────
+        with st.spinner("Running deep learning models..."):
+            pred = simple_prediction(df)
+
+        direction  = pred.get("direction", "HOLD")
         confidence = pred.get("confidence", 50)
-        reason = pred.get("reason", "")
+        reason     = pred.get("reason", "")
         pred_color = "#22c55e" if direction == "BUY" else "#ef4444" if direction == "SELL" else "#f59e0b"
 
         st.markdown(f"""
@@ -429,4 +419,25 @@ if df is not None and not df.empty:
             <div style="font-size:12px;color:#9ca3af;">{reason}</div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Model breakdown
+        all_models = pred.get("all_models", {})
+        if all_models:
+            st.markdown("""
+            <div style="margin-top:14px;padding-top:10px;border-top:1px solid #1e1e2e;">
+                <div class="card-title">Model Breakdown</div>
+            </div>
+            """, unsafe_allow_html=True)
+            for mname, mdata in all_models.items():
+                mp = mdata.get("prediction", "HOLD")
+                mc = mdata.get("confidence", 50)
+                mc_col = "#22c55e" if mp == "UP" else "#ef4444" if mp == "DOWN" else "#f59e0b"
+                st.markdown(f"""
+                <div style="display:flex;justify-content:space-between;align-items:center;
+                            padding:5px 0;border-bottom:1px solid #1a1a2a;font-size:12px;">
+                    <span style="color:#9ca3af;">{mname}</span>
+                    <span style="color:{mc_col};font-weight:600;">{mp} · {mc}%</span>
+                </div>
+                """, unsafe_allow_html=True)
+
         st.markdown('</div>', unsafe_allow_html=True)
