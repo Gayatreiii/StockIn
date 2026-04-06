@@ -13,217 +13,230 @@ except ImportError:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# DEEP LEARNING MODEL DEFINITIONS
-# ════════════════════════════════════════════════════════════════════════════
-
-# ── 1. Attention Mechanism ────────────────────────────────────────────────────
-class AttentionLayer(nn.Module):
-    """
-    Bahdanau-style attention. Learns which time steps matter most
-    for prediction. Used inside LSTM and Hybrid models.
-    """
-    def __init__(self, hidden_size: int):
-        super().__init__()
-        self.attn = nn.Linear(hidden_size, 1)
-
-    def forward(self, lstm_out):
-        # lstm_out: (batch, seq_len, hidden)
-        scores = self.attn(lstm_out).squeeze(-1)           # (batch, seq_len)
-        weights = torch.softmax(scores, dim=1).unsqueeze(-1)  # (batch, seq_len, 1)
-        context = (lstm_out * weights).sum(dim=1)          # (batch, hidden)
-        return context
-
-
-# ── 2. Bidirectional LSTM + Attention ────────────────────────────────────────
-class LSTMAttentionModel(nn.Module):
-    """
-    Bidirectional LSTM with Attention mechanism.
-    Processes stock price sequences in both directions,
-    then focuses on the most informative time steps.
-    """
-    def __init__(self, input_size: int, hidden: int = 64, layers: int = 2):
-        super().__init__()
-        self.lstm = nn.LSTM(
-            input_size, hidden, layers,
-            batch_first=True, dropout=0.3, bidirectional=True
-        )
-        self.attention = AttentionLayer(hidden * 2)  # *2 for bidirectional
-        self.fc = nn.Sequential(
-            nn.Linear(hidden * 2, 32),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32, 2)
-        )
-
-    def forward(self, x):
-        out, _ = self.lstm(x)
-        ctx = self.attention(out)
-        return self.fc(ctx)
-
-
-# ── 3. CNN for Temporal Pattern Detection ────────────────────────────────────
-class CNNModel(nn.Module):
-    """
-    1D Convolutional Neural Network.
-    Treats the price sequence like an image — detects local patterns
-    (e.g., head & shoulders, double bottom) using convolutional filters.
-    """
-    def __init__(self, input_size: int):
-        super().__init__()
-        self.convs = nn.Sequential(
-            nn.Conv1d(input_size, 64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Conv1d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Conv1d(128, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),
-        )
-        self.fc = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32, 2)
-        )
-
-    def forward(self, x):
-        # x: (batch, seq, features) → (batch, features, seq) for Conv1d
-        x = x.permute(0, 2, 1)
-        x = self.convs(x)
-        return self.fc(x)
-
-
-# ── 4. Positional Encoding (for Transformer) ─────────────────────────────────
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500):
-        super().__init__()
-        self.dropout = nn.Dropout(dropout)
-        pe = torch.zeros(max_len, d_model)
-        pos = torch.arange(0, max_len).unsqueeze(1).float()
-        div = torch.exp(
-            torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
-        )
-        pe[:, 0::2] = torch.sin(pos * div)
-        pe[:, 1::2] = torch.cos(pos * div)
-        self.register_buffer("pe", pe.unsqueeze(0))
-
-    def forward(self, x):
-        x = x + self.pe[:, :x.size(1)]
-        return self.dropout(x)
-
-
-# ── 5. Transformer with Multi-Head Self-Attention ────────────────────────────
-class TransformerModel(nn.Module):
-    """
-    Transformer encoder with positional encoding and multi-head attention.
-    Self-attention lets each day attend to all other days simultaneously —
-    captures long-range dependencies in price history.
-    """
-    def __init__(self, input_size: int, d_model: int = 64, nhead: int = 4, layers: int = 2):
-        super().__init__()
-        self.proj = nn.Linear(input_size, d_model)
-        self.pos_enc = PositionalEncoding(d_model)
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead,
-            dim_feedforward=128, dropout=0.2,
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(enc_layer, num_layers=layers)
-        self.fc = nn.Sequential(
-            nn.Linear(d_model, 32),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(32, 2)
-        )
-
-    def forward(self, x):
-        x = self.proj(x)
-        x = self.pos_enc(x)
-        x = self.transformer(x)
-        x = x.mean(dim=1)   # global average over sequence
-        return self.fc(x)
-
-
-# ── 6. Hybrid CNN-LSTM with Attention ────────────────────────────────────────
-class HybridCNNLSTM(nn.Module):
-    """
-    Hybrid Deep Learning: CNN extracts local patterns → LSTM learns
-    temporal dependencies → Attention focuses on important steps.
-    This is the main prediction model.
-    """
-    def __init__(self, input_size: int, hidden: int = 64):
-        super().__init__()
-        # CNN feature extractor
-        self.cnn = nn.Sequential(
-            nn.Conv1d(input_size, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-        )
-        # LSTM sequence model
-        self.lstm = nn.LSTM(64, hidden, num_layers=2, batch_first=True, dropout=0.3)
-        # Attention
-        self.attention = AttentionLayer(hidden)
-        # Classifier
-        self.fc = nn.Sequential(
-            nn.Linear(hidden, 32),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32, 2)
-        )
-
-    def forward(self, x):
-        # CNN: (batch, seq, feat) → (batch, feat, seq) → CNN → (batch, 64, seq)
-        cnn_out = self.cnn(x.permute(0, 2, 1))
-        # Back to (batch, seq, 64) for LSTM
-        lstm_out, _ = self.lstm(cnn_out.permute(0, 2, 1))
-        ctx = self.attention(lstm_out)
-        return self.fc(ctx)
-
-
-# ── 7. Graph Neural Network (GNN) for indicator relationships ─────────────────
-class GNNLayer(nn.Module):
-    """
-    Graph Attention Network layer.
-    Each technical indicator is a node. The GNN learns which
-    indicators are most correlated and weights them accordingly.
-    """
-    def __init__(self, in_feat: int, out_feat: int):
-        super().__init__()
-        self.W = nn.Linear(in_feat, out_feat, bias=False)
-        self.a = nn.Linear(2 * out_feat, 1, bias=False)
-        self.leaky = nn.LeakyReLU(0.2)
-
-    def forward(self, x, adj):
-        h = self.W(x)           # (N, out_feat)
-        N = h.size(0)
-        hi = h.unsqueeze(1).expand(-1, N, -1)
-        hj = h.unsqueeze(0).expand(N, -1, -1)
-        e = self.leaky(self.a(torch.cat([hi, hj], dim=-1)).squeeze(-1))
-        mask = -9e15 * torch.ones_like(e)
-        attn = torch.where(adj > 0, e, mask)
-        attn = torch.softmax(attn, dim=1)
-        return torch.relu(torch.matmul(attn, h))
-
-
-class GNNSignal(nn.Module):
-    """Two-layer GNN for technical indicator graph."""
-    def __init__(self, n_nodes: int):
-        super().__init__()
-        self.gnn1 = GNNLayer(1, 16)
-        self.gnn2 = GNNLayer(16, 8)
-        self.out = nn.Linear(n_nodes * 8, 3)   # bullish / neutral / bearish
-
-    def forward(self, x, adj):
-        x = self.gnn1(x, adj)
-        x = self.gnn2(x, adj)
-        return self.out(x.view(1, -1))
-
 
 # ════════════════════════════════════════════════════════════════════════════
+# DEEP LEARNING MODEL DEFINITIONS  (only defined when torch is available)
+# ════════════════════════════════════════════════════════════════════════════
+
+if not TORCH_AVAILABLE:
+    # Dummy stubs so names exist at module scope; never instantiated without torch
+    class _DummyModule:
+        pass
+    AttentionLayer = LSTMAttentionModel = CNNModel = _DummyModule
+    PositionalEncoding = TransformerModel = HybridCNNLSTM = _DummyModule
+    GNNLayer = GNNSignal = _DummyModule
+else:
+    # ── 1. Attention Mechanism ────────────────────────────────────────────────────
+    class AttentionLayer(nn.Module):
+        """
+        Bahdanau-style attention. Learns which time steps matter most
+        for prediction. Used inside LSTM and Hybrid models.
+        """
+        def __init__(self, hidden_size: int):
+            super().__init__()
+            self.attn = nn.Linear(hidden_size, 1)
+
+        def forward(self, lstm_out):
+            # lstm_out: (batch, seq_len, hidden)
+            scores = self.attn(lstm_out).squeeze(-1)           # (batch, seq_len)
+            weights = torch.softmax(scores, dim=1).unsqueeze(-1)  # (batch, seq_len, 1)
+            context = (lstm_out * weights).sum(dim=1)          # (batch, hidden)
+            return context
+
+
+    # ── 2. Bidirectional LSTM + Attention ────────────────────────────────────────
+    class LSTMAttentionModel(nn.Module):
+        """
+        Bidirectional LSTM with Attention mechanism.
+        Processes stock price sequences in both directions,
+        then focuses on the most informative time steps.
+        """
+        def __init__(self, input_size: int, hidden: int = 64, layers: int = 2):
+            super().__init__()
+            self.lstm = nn.LSTM(
+                input_size, hidden, layers,
+                batch_first=True, dropout=0.3, bidirectional=True
+            )
+            self.attention = AttentionLayer(hidden * 2)  # *2 for bidirectional
+            self.fc = nn.Sequential(
+                nn.Linear(hidden * 2, 32),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(32, 2)
+            )
+
+        def forward(self, x):
+            out, _ = self.lstm(x)
+            ctx = self.attention(out)
+            return self.fc(ctx)
+
+
+    # ── 3. CNN for Temporal Pattern Detection ────────────────────────────────────
+    class CNNModel(nn.Module):
+        """
+        1D Convolutional Neural Network.
+        Treats the price sequence like an image — detects local patterns
+        (e.g., head & shoulders, double bottom) using convolutional filters.
+        """
+        def __init__(self, input_size: int):
+            super().__init__()
+            self.convs = nn.Sequential(
+                nn.Conv1d(input_size, 64, kernel_size=3, padding=1),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.Conv1d(64, 128, kernel_size=3, padding=1),
+                nn.BatchNorm1d(128),
+                nn.ReLU(),
+                nn.Conv1d(128, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool1d(1),
+            )
+            self.fc = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(64, 32),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(32, 2)
+            )
+
+        def forward(self, x):
+            # x: (batch, seq, features) → (batch, features, seq) for Conv1d
+            x = x.permute(0, 2, 1)
+            x = self.convs(x)
+            return self.fc(x)
+
+
+    # ── 4. Positional Encoding (for Transformer) ─────────────────────────────────
+    class PositionalEncoding(nn.Module):
+        def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500):
+            super().__init__()
+            self.dropout = nn.Dropout(dropout)
+            pe = torch.zeros(max_len, d_model)
+            pos = torch.arange(0, max_len).unsqueeze(1).float()
+            div = torch.exp(
+                torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
+            )
+            pe[:, 0::2] = torch.sin(pos * div)
+            pe[:, 1::2] = torch.cos(pos * div)
+            self.register_buffer("pe", pe.unsqueeze(0))
+
+        def forward(self, x):
+            x = x + self.pe[:, :x.size(1)]
+            return self.dropout(x)
+
+
+    # ── 5. Transformer with Multi-Head Self-Attention ────────────────────────────
+    class TransformerModel(nn.Module):
+        """
+        Transformer encoder with positional encoding and multi-head attention.
+        Self-attention lets each day attend to all other days simultaneously —
+        captures long-range dependencies in price history.
+        """
+        def __init__(self, input_size: int, d_model: int = 64, nhead: int = 4, layers: int = 2):
+            super().__init__()
+            self.proj = nn.Linear(input_size, d_model)
+            self.pos_enc = PositionalEncoding(d_model)
+            enc_layer = nn.TransformerEncoderLayer(
+                d_model=d_model, nhead=nhead,
+                dim_feedforward=128, dropout=0.2,
+                batch_first=True
+            )
+            self.transformer = nn.TransformerEncoder(enc_layer, num_layers=layers)
+            self.fc = nn.Sequential(
+                nn.Linear(d_model, 32),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(32, 2)
+            )
+
+        def forward(self, x):
+            x = self.proj(x)
+            x = self.pos_enc(x)
+            x = self.transformer(x)
+            x = x.mean(dim=1)   # global average over sequence
+            return self.fc(x)
+
+
+    # ── 6. Hybrid CNN-LSTM with Attention ────────────────────────────────────────
+    class HybridCNNLSTM(nn.Module):
+        """
+        Hybrid Deep Learning: CNN extracts local patterns → LSTM learns
+        temporal dependencies → Attention focuses on important steps.
+        This is the main prediction model.
+        """
+        def __init__(self, input_size: int, hidden: int = 64):
+            super().__init__()
+            # CNN feature extractor
+            self.cnn = nn.Sequential(
+                nn.Conv1d(input_size, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv1d(64, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+            )
+            # LSTM sequence model
+            self.lstm = nn.LSTM(64, hidden, num_layers=2, batch_first=True, dropout=0.3)
+            # Attention
+            self.attention = AttentionLayer(hidden)
+            # Classifier
+            self.fc = nn.Sequential(
+                nn.Linear(hidden, 32),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(32, 2)
+            )
+
+        def forward(self, x):
+            # CNN: (batch, seq, feat) → (batch, feat, seq) → CNN → (batch, 64, seq)
+            cnn_out = self.cnn(x.permute(0, 2, 1))
+            # Back to (batch, seq, 64) for LSTM
+            lstm_out, _ = self.lstm(cnn_out.permute(0, 2, 1))
+            ctx = self.attention(lstm_out)
+            return self.fc(ctx)
+
+
+    # ── 7. Graph Neural Network (GNN) for indicator relationships ─────────────────
+    class GNNLayer(nn.Module):
+        """
+        Graph Attention Network layer.
+        Each technical indicator is a node. The GNN learns which
+        indicators are most correlated and weights them accordingly.
+        """
+        def __init__(self, in_feat: int, out_feat: int):
+            super().__init__()
+            self.W = nn.Linear(in_feat, out_feat, bias=False)
+            self.a = nn.Linear(2 * out_feat, 1, bias=False)
+            self.leaky = nn.LeakyReLU(0.2)
+
+        def forward(self, x, adj):
+            h = self.W(x)           # (N, out_feat)
+            N = h.size(0)
+            hi = h.unsqueeze(1).expand(-1, N, -1)
+            hj = h.unsqueeze(0).expand(N, -1, -1)
+            e = self.leaky(self.a(torch.cat([hi, hj], dim=-1)).squeeze(-1))
+            mask = -9e15 * torch.ones_like(e)
+            attn = torch.where(adj > 0, e, mask)
+            attn = torch.softmax(attn, dim=1)
+            return torch.relu(torch.matmul(attn, h))
+
+
+    class GNNSignal(nn.Module):
+        """Two-layer GNN for technical indicator graph."""
+        def __init__(self, n_nodes: int):
+            super().__init__()
+            self.gnn1 = GNNLayer(1, 16)
+            self.gnn2 = GNNLayer(16, 8)
+            self.out = nn.Linear(n_nodes * 8, 3)   # bullish / neutral / bearish
+
+        def forward(self, x, adj):
+            x = self.gnn1(x, adj)
+            x = self.gnn2(x, adj)
+            return self.out(x.view(1, -1))
+
+
+    # ════════════════════════════════════════════════════════════════════════════
+
+# end if TORCH_AVAILABLE
+
 # DATA PREPARATION
 # ════════════════════════════════════════════════════════════════════════════
 
